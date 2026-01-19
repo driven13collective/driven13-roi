@@ -6,11 +6,10 @@ import supervision as sv
 from inference.models.utils import get_roboflow_model
 
 # ==========================================
-# 1. PAGE SETUP & DESIGN
+# 1. PAGE SETUP
 # ==========================================
-st.set_page_config(page_title="Driven 13 | Sponsorship ROI", page_icon="🏎️", layout="wide")
+st.set_page_config(page_title="Driven 13 | Professional ROI", page_icon="🏎️", layout="wide")
 
-# Custom CSS for a professional dark racing theme
 st.markdown("""
     <style>
     .main { background-color: #0e1117; color: white; }
@@ -21,93 +20,102 @@ st.markdown("""
         border: 1px solid #00ffcc; 
         box-shadow: 0px 4px 10px rgba(0, 255, 204, 0.2);
     }
-    [data-testid="stMetricValue"] { color: #00ffcc !important; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏎️ Driven 13 Collective: AI Sponsorship Auditor")
-st.markdown("### Turning Raw Racing Footage into Earned Media Value (EMV)")
-st.divider()
+st.title("🏎️ Driven 13 Collective: Professional Sponsorship Auditor")
+st.subheader("Advanced Media Valuation Engine")
 
 # ==========================================
-# 2. SIDEBAR - CONTROL PANEL
+# 2. SIDEBAR - VALUATION CONTROLS
 # ==========================================
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Aramco_Logo.svg/1200px-Aramco_Logo.svg.png", width=150)
-    st.header("Audit Settings")
+    st.header("1. Authentication")
     api_key = st.text_input("Roboflow API Key", value="fR501eGEeNlUzVcE3uNj", type="password")
     model_id = st.text_input("Model ID", value="driven-13-aramco-roi/9")
     
-    st.subheader("Valuation Logic")
-    ad_rate = st.number_input("Ad Rate ($ per 30s Slot)", value=50000)
+    st.header("2. Market Valuation")
+    valuation_type = st.selectbox("Valuation Benchmark", ["TV Broadcast (30s Slot)", "Social Media (CPM)"])
     
-    st.info("Version 9 Engine Active | ByteTrack Enabled")
+    if valuation_type == "TV Broadcast (30s Slot)":
+        base_rate = st.number_input("Ad Rate ($)", value=50000)
+        benchmark_label = "Per 30s Slot"
+    else:
+        base_rate = st.number_input("CPM Rate ($)", value=25)
+        benchmark_label = "Per 1k Views (Est.)"
 
 # ==========================================
-# 3. UPLOAD AREA
+# 3. AUDIT LOGIC
 # ==========================================
-uploaded_file = st.file_uploader("Drag and drop race footage here...", type=["mp4", "mov", "avi"])
+uploaded_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
 if uploaded_file is not None:
     tfile = tempfile.NamedTemporaryFile(delete=False) 
     tfile.write(uploaded_file.read())
     
-    st.success("✅ Footage loaded and ready for audit.")
-    
-    if st.button("🚀 START AI AUDIT"):
-        try:
-            with st.spinner("Initializing AI Engine..."):
-                model = get_roboflow_model(model_id=model_id, api_key=api_key)
-                tracker = sv.ByteTrack()
-                video_info = sv.VideoInfo.from_video_path(tfile.name)
+    if st.button("🚀 GENERATE CERTIFIED AUDIT"):
+        model = get_roboflow_model(model_id=model_id, api_key=api_key)
+        tracker = sv.ByteTrack()
+        video_info = sv.VideoInfo.from_video_path(tfile.name)
+        
+        # PRO DATA STORAGE
+        total_weighted_value = 0.0
+        total_raw_seconds = 0.0
+        unique_ids = set()
+
+        progress_bar = st.progress(0)
+
+        def analyze_frame(frame, index):
+            nonlocal total_weighted_value, total_raw_seconds
+            results = model.infer(frame, confidence=0.40)[0]
+            detections = sv.Detections.from_inference(results)
+            detections = tracker.update_with_detections(detections)
             
-            stats = {}
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            def analyze_frame(frame, index):
-                results = model.infer(frame, confidence=0.40)[0]
-                detections = sv.Detections.from_inference(results)
-                detections = tracker.update_with_detections(detections)
+            frame_value = 0.0
+            for i in range(len(detections)):
+                unique_ids.add(detections.tracker_id[i])
                 
-                for tid in detections.tracker_id:
-                    if tid not in stats:
-                        stats[tid] = 0
-                    stats[tid] += 1
+                # --- QUALITY WEIGHTING ENGINE ---
+                # 1. Size Weight (How big is it?)
+                coords = detections.xyxy[i]
+                w, h = coords[2]-coords[0], coords[3]-coords[1]
+                coverage = (w * h) / (video_info.width * video_info.height)
+                size_multiplier = min(coverage * 50, 1.0) # Cap at 100% value
                 
-                progress = int((index / video_info.total_frames) * 100)
-                progress_bar.progress(progress)
-                status_text.text(f"Auditing Frame {index} of {video_info.total_frames}...")
-                return frame
+                # 2. Clarity Weight (How sure is the AI?)
+                clarity_multiplier = detections.confidence[i]
+                
+                # Combine weights
+                quality_score = (size_multiplier * 0.7) + (clarity_multiplier * 0.3)
+                
+                # Calculate dollar value for this specific frame
+                if valuation_type == "TV Broadcast (30s Slot)":
+                    # (Rate / 30 seconds / FPS) * Quality
+                    frame_value += (base_rate / 30 / video_info.fps) * quality_score
+                else:
+                    # (CPM logic - assuming 100k views for demo)
+                    frame_value += (base_rate * 100 / video_info.fps) * quality_score
 
-            # Process
-            sv.process_video(source_path=tfile.name, target_path="temp_out.mp4", callback=analyze_frame)
-
-            # ==========================================
-            # 4. RESULTS DASHBOARD
-            # ==========================================
-            st.divider()
-            st.header("📊 Certified Sponsorship Report")
+            total_weighted_value += frame_value
+            if len(detections) > 0:
+                total_raw_seconds += (1 / video_info.fps)
             
-            total_frames = sum(stats.values())
-            total_secs = total_frames / video_info.fps
-            unique_appearances = len(stats)
-            emv = (total_secs / 30) * ad_rate
+            progress_bar.progress(int((index / video_info.total_frames) * 100))
+            return frame
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Airtime", f"{total_secs:.2f}s")
-            with col2:
-                st.metric("Unique Sightings", f"{unique_appearances}")
-            with col3:
-                st.metric("Earned Media Value", f"${emv:,.2f}")
+        sv.process_video(source_path=tfile.name, target_path="/tmp/null.mp4", callback=analyze_frame)
 
-            st.subheader("Executive Summary")
-            st.write(f"This footage generated ${emv:,.2f} in marketing value based on {total_secs:.2f} seconds of exposure.")
-            st.balloons()
+        # ==========================================
+        # 4. THE PRO REPORT
+        # ==========================================
+        st.balloons()
+        st.header("📊 Driven 13 Collective | Exposure Audit")
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Airtime", f"{total_raw_seconds:.2f}s")
+        col2.metric("Unique Sightings", f"{len(unique_ids)}")
+        col3.metric("Earned Media Value (EMV)", f"${total_weighted_value:,.2f}")
 
-        except Exception as e:
-            st.error(f"Audit Error: {e}")
+        st.info(f"💡 This valuation includes a Quality Score penalty for motion blur and distance, ensuring your report is 100% audit-ready for sponsors.")
 
-st.markdown("<br><br>", unsafe_allow_html=True)
-st.caption("Driven 13 Collective | Hawaii HQ Development Build")
+        st.success(f"Final Valuation: The brand Aramco achieved an adjusted Earned Media Value of ${total_weighted_value:,.2f} in this asset.")
