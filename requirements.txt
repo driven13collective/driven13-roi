@@ -1,0 +1,4 @@
+streamlit
+supervision
+inference
+opencv-python-headless
