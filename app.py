@@ -12,7 +12,7 @@ st.markdown("<style>.stMetric {background-color: #1e2130; padding: 15px; border-
 
 st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
 
-# 2. CONFIGURATION (Sidebar)
+# 2. SIDEBAR CONFIG
 with st.sidebar:
     st.header("Audit & Goal Settings")
     api_key = st.text_input("API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
@@ -42,7 +42,8 @@ if up_file:
     with col1:
         st.subheader("Live Analysis")
         frame_window = st.empty()
-        # Goal Progress Bar
+        
+        # --- NEW: GOAL PROGRESS BAR ---
         goal_text = st.empty()
         goal_bar = st.progress(0)
         
@@ -59,7 +60,8 @@ if up_file:
                 for pred in results['predictions']:
                     label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
                     
-                    # MEDIA QUALITY SCORE: (Size of Logo) + (AI Confidence)
+                    # --- NEW: MEDIA QUALITY SCORE LOGIC ---
+                    # area = size relative to screen. confidence = AI certainty.
                     area = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
                     q_score = min(((area * 1000) + (pred['confidence'] * 100)) / 2, 100)
                     
@@ -67,40 +69,51 @@ if up_file:
                     st.session_state.audit_data[label]["money"] += val_price if label == "Valvoline" else comp_price
                     st.session_state.audit_data[label]["quality_sum"] += q_score
 
-                # Update Progress Bar
+                # Update Progress Bar Live
                 current_roi = st.session_state.audit_data["Valvoline"]["money"]
                 progress_pct = min(current_roi / roi_goal, 1.0)
                 goal_bar.progress(progress_pct)
-                goal_text.write(f"**Goal Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f} ({progress_pct*100:.1f}%)")
+                goal_text.write(f"**Valvoline ROI Goal Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f} ({progress_pct*100:.1f}%)")
 
                 frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             
             if current_roi >= roi_goal:
                 st.balloons()
-                st.success("Target ROI Goal Reached!")
+                st.success("🎯 Target ROI Goal Reached!")
             cap.release()
 
     with col2:
-        st.subheader("Financial Performance")
+        st.subheader("Financial Share of Voice")
         
         report_list = []
         for brand, stats in st.session_state.audit_data.items():
             avg_q = stats["quality_sum"] / stats["sightings"] if stats["sightings"] > 0 else 0
             report_list.append({
                 "Brand": brand, "Money": stats["money"], 
-                "Sightings": stats["sightings"], "Quality": round(avg_q, 1)
+                "Sightings": stats["sightings"], "Media Quality Score": round(avg_q, 1)
             })
         
         df_roi = pd.DataFrame(report_list)
-        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, color_discrete_sequence=['#CC0000', '#003366'])
+        
+        # Pie Chart
+        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, 
+                     color_discrete_sequence=['#CC0000', '#003366'])
+        fig.update_traces(texttemplate="$%{value:,.0f}<br>%{percent}")
         st.plotly_chart(fig, use_container_width=True)
 
         for _, row in df_roi.iterrows():
-            st.metric(f"{row['Brand']} Quality", f"{row['Quality']}%")
+            st.metric(f"{row['Brand']} Quality", f"{row['Media Quality Score']}%")
 
+        # --- DOWNLOAD DRIVEN 13 REPORT ---
         st.divider()
         csv = df_roi.to_csv(index=False).encode('utf-8')
-        st.download_button(label="📥 Download Driven 13 ROI Report", data=csv, file_name='Driven13_ROI_Report.csv', mime='text/csv')
+        st.download_button(
+            label="📥 Download Driven 13 ROI Report", 
+            data=csv, 
+            file_name='Driven13_ROI_Report.csv', 
+            mime='text/csv'
+        )
 
 st.caption("Driven 13 Collective | Sponsorship Auditor V13.0")
+
 
