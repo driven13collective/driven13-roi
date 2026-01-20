@@ -5,177 +5,103 @@ import os
 import supervision as sv
 import pandas as pd
 import plotly.express as px
-from inference.models.utils import get_roboflow_model
+from roboflow import Roboflow
 
 # 1. PAGE SETUP
-st.set_page_config(page_title="Driven 13 | Competitive ROI", page_icon="🏎️", layout="wide")
+st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
 st.markdown("<style>.stMetric {background-color: #1e2130; padding: 20px; border-radius: 15px; border: 1px solid #00ffcc;}</style>", unsafe_allow_html=True)
 
-st.title("🏎️ Driven 13 Collective: Competitive Sponsorship Auditor")
-st.subheader("Multi-Brand Share of Voice & Media Valuation")
+st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
+st.subheader("Valvoline vs. Competitive Share of Voice")
 
-# 2. SIDEBAR
+# 2. SIDEBAR CONFIG
 with st.sidebar:
     st.header("Settings")
-    api_key = st.text_input("Roboflow API Key", value="fR501eGEeNlUzVcE3uNj", type="password")
-    model_id = st.text_input("Model ID", value="driven-13-aramco-roi/9")
-    val_type = st.selectbox("Benchmark", ["TV (30s Slot)", "Social (CPM)"])
-    base_rate = st.number_input("Market Rate ($)", value=50000 if "TV" in val_type else 25)
+    # Using your provided credentials
+    api_key = st.text_input("Roboflow API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
+    model_id = st.text_input("Model ID", value="valvoline-roi/1")
+    val_price = st.number_input("Valvoline Value ($/sighting)", value=15.0)
+    comp_price = st.number_input("Competitor Value ($/sighting)", value=10.0)
 
-# 3. UPLOAD & AUDIT
+# 3. INITIALIZE MODELS
+rf = Roboflow(api_key=api_key)
+project = rf.workspace().project("valvoline-roi")
+model = project.version(1).model 
+tracker = sv.ByteTrack()
+
+# 4. UPLOAD
 up_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
 if up_file is not None:
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(up_file.read())
     
-    if st.button("🚀 GENERATE COMPETITIVE AUDIT"):
-        try:
-            model = get_roboflow_model(model_id=model_id, api_key=api_key)
-            tracker = sv.ByteTrack()
-            v_info = sv.VideoInfo.from_video_path(tfile.name)
-            
-            # --- MULTI-CLASS DATA STORAGE ---
-            # This tracks every brand the AI sees separately
-            brand_stats = {} 
-            prog = st.progress(0)
-
-            def analyze_frame(frame, idx):
-                res = model.infer(frame, confidence=0.40)[0]
-                det = sv.Detections.from_inference(res)
-                det = tracker.update_with_detections(det)
-                
-                for i in range(len(det)):
-                    # Get brand name from the model detection
-                    brand = det.data['class_name'][i]
-                    
-                    if brand not in brand_stats:
-                        brand_stats[brand] = {"val": 0.0, "frames": 0, "ids": set()}
-                    
-                    brand_stats[brand]["ids"].add(det.tracker_id[i])
-                    brand_stats[brand]["frames"] += 1
-                    
-                    # Valuation Logic
-                    box = det.xyxy[i]
-                    area = ((box[2]-box[0])*(box[3]-box[1])) / (v_info.width*v_info.height)
-                    quality = (min(area * 50, 1.0) * 0.7) + (det.confidence[i] * 0.3)
-                    
-                    if "TV" in val_type:
-                        brand_stats[brand]["val"] += (base_rate / 30 / v_info.fps) * quality
-                    else:
-                        brand_stats[brand]["val"] += (base_rate * 100 / v_info.fps) * quality
-
-                if idx % 20 == 0: prog.progress(int((idx / v_info.total_frames) * 100))
-                return frame
-
-            sv.process_video(source_path=tfile.name, target_path="/tmp/null.mp4", callback=analyze_frame)
-
-            # --- 4. DISPLAY COMPETITIVE RESULTS ---
-            st.balloons()
-            st.header("📊 Market Share of Voice (SoV) Report")
-            
-            # Convert stats to a readable Table for Charting
-            report_data = []
-            for brand, data in brand_stats.items():
-                secs = data["frames"] / v_info.fps
-                report_data.append({
-                    "Brand": brand,
-                    "Total Exposure (s)": round(secs, 2),
-                    "Earned Media Value ($)": round(data["val"], 2),
-                    "Unique Sightings": len(data["ids"])
-                })
-            
-            df = pd.DataFrame(report_data)
-
-            # Create visual charts
-            col_chart, col_data = st.columns([2, 1])
-            
-            with col_chart:
-                fig = px.pie(df, values='Total Exposure (s)', names='Brand', 
-                             title='Share of Voice (By Airtime)',
-                             color_discrete_sequence=px.colors.qualitative.Pastel)
-                fig.update_traces(textposition='inside', textinfo='percent+label')
-                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col_data:
-                st.write("### Total Value by Brand")
-                for index, row in df.iterrows():
-                    st.metric(f"{row['Brand']}", f"${row['Earned Media Value ($)']:,.2f}")
-
-            st.divider()
-            st.write("### Technical Breakdown")
-            st.table(df)
-
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-st.caption("Driven 13 Collective | Competitive Audit Build | V10.3")
-import streamlit as st
-import cv2
-import tempfile
-import pandas as pd
-import plotly.express as px
-from roboflow import Roboflow
-
-# 1. API Setup
-API_KEY = "3rcTmYwUyM4deHfzdLhy"
-rf = Roboflow(api_key=API_KEY)
-project = rf.workspace().project("valvoline-roi")
-model = project.version(1).model 
-
-st.title("Driven13 Valvoline ROI Tracker")
-
-# 2. Values (You can change these in the app sidebar)
-val_price = st.sidebar.number_input("Valvoline $/sighting", value=15.0)
-comp_price = st.sidebar.number_input("Competitor $/sighting", value=10.0)
-
-uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov"])
-
-if uploaded_file:
-    # Setup video processing
-    tfile = tempfile.NamedTemporaryFile(delete=False) 
-    tfile.write(uploaded_file.read())
-    cap = cv2.VideoCapture(tfile.name)
-    
-    counts = {"Valvoline": 0, "Competitor": 0}
-    
     col1, col2 = st.columns([2, 1])
     
+    # Storage for ROI Data
+    # Using a dictionary to keep live track
+    if 'brand_stats' not in st.session_state:
+        st.session_state.brand_stats = {"Valvoline": {"money": 0.0, "sightings": 0}, 
+                                        "Competitor": {"money": 0.0, "sightings": 0}}
+
     with col1:
+        st.subheader("AI Analysis Feed")
         frame_window = st.empty()
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret: break
-            
-            # AI Inference
-            results = model.predict(frame, confidence=45).json()
-            
-            # Count Logic
-            for pred in results['predictions']:
-                # The class name must match what you typed in Roboflow!
-                label = pred['class'] 
-                if label in counts:
-                    counts[label] += 1
-                else:
-                    counts["Competitor"] += 1
-            
-            frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        cap = cv2.VideoCapture(tfile.name)
+        v_info = sv.VideoInfo.from_video_path(tfile.name)
+
+        if st.button("🚀 START ROI AUDIT"):
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
+                
+                # Inference
+                results = model.predict(frame, confidence=45).json()
+                detections = sv.Detections.from_inference(results)
+                detections = tracker.update_with_detections(detections)
+                
+                # Update Stats
+                for pred in results['predictions']:
+                    label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
+                    st.session_state.brand_stats[label]["sightings"] += 1
+                    price = val_price if label == "Valvoline" else comp_price
+                    st.session_state.brand_stats[label]["money"] += price
+
+                # Visuals
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_window.image(frame_rgb)
+            cap.release()
 
     with col2:
-        # 3. Monetary + Sighting Dataframe
-        df_roi = pd.DataFrame({
-            "Brand": ["Valvoline", "Competitor"],
-            "Money": [counts["Valvoline"] * val_price, counts["Competitor"] * comp_price],
-            "Sightings": [counts["Valvoline"], counts["Competitor"]]
-        })
+        st.subheader("Financial Performance")
         
-        # 4. The Pie Chart
-        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4)
+        # Create DataFrame from session stats
+        df_roi = pd.DataFrame([
+            {"Brand": "Valvoline", "Money": st.session_state.brand_stats["Valvoline"]["money"], "Sightings": st.session_state.brand_stats["Valvoline"]["sightings"]},
+            {"Brand": "Competitor", "Money": st.session_state.brand_stats["Competitor"]["money"], "Sightings": st.session_state.brand_stats["Competitor"]["sightings"]}
+        ])
+        
+        # Pie Chart
+        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4,
+                     color_discrete_sequence=['#CC0000', '#003366'])
         fig.update_traces(
             textinfo='label+percent',
             texttemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{customdata[0]} Sightings",
             customdata=df_roi[['Sightings']]
         )
-        st.plotly_chart(fig)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 5. DOWNLOAD REPORT
+        st.divider()
+        st.subheader("Driven 13 ROI Report")
+        
+        csv = df_roi.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download ROI Report (CSV)",
+            data=csv,
+            file_name='Driven13_ROI_Report.csv',
+            mime='text/csv',
+        )
+
+st.caption("Driven 13 Collective | ROI Sponsorship Auditor | V11.0")
 
