@@ -5,14 +5,15 @@ import supervision as sv
 import pandas as pd
 import plotly.express as px
 from roboflow import Roboflow
+import urllib.parse
 
 # 1. PAGE SETUP
 st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
-st.markdown("<style>.stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc;}</style>", unsafe_allow_html=True)
+st.markdown("<style>.stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc; color: white;}</style>", unsafe_allow_html=True)
 
 st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
 
-# 2. SIDEBAR CONFIG
+# 2. SIDEBAR
 with st.sidebar:
     st.header("Audit & Goal Settings")
     api_key = st.text_input("API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
@@ -21,7 +22,7 @@ with st.sidebar:
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     comp_price = st.number_input("Competitor $/sighting", value=10.0)
 
-# 3. INITIALIZE AI
+# 3. INITIALIZE
 rf = Roboflow(api_key=api_key)
 project = rf.workspace().project("valvoline-roi")
 model = project.version(1).model 
@@ -43,8 +44,6 @@ if up_file:
     with col1:
         st.subheader("Live Analysis")
         frame_window = st.empty()
-        
-        # --- GOAL PROGRESS BAR ---
         goal_text = st.empty()
         goal_bar = st.progress(0)
         
@@ -57,11 +56,8 @@ if up_file:
                 if not ret: break
                 
                 results = model.predict(frame, confidence=40).json()
-                
                 for pred in results['predictions']:
                     label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
-                    
-                    # --- MEDIA QUALITY SCORE LOGIC ---
                     area = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
                     q_score = min(((area * 1000) + (pred['confidence'] * 100)) / 2, 100)
                     
@@ -69,55 +65,47 @@ if up_file:
                     st.session_state.audit_data[label]["money"] += val_price if label == "Valvoline" else comp_price
                     st.session_state.audit_data[label]["quality_sum"] += q_score
 
-                # Update Progress Bar Live
                 current_roi = st.session_state.audit_data["Valvoline"]["money"]
                 progress_pct = min(current_roi / roi_goal, 1.0)
                 goal_bar.progress(progress_pct)
-                goal_text.write(f"**Valvoline ROI Goal Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f} ({progress_pct*100:.1f}%)")
-
+                goal_text.write(f"**Valvoline ROI Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f}")
                 frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             
-            if current_roi >= roi_goal:
-                st.balloons()
-                st.success("🎯 Target ROI Goal Reached!")
+            if current_roi >= roi_goal: st.balloons()
             cap.release()
 
     with col2:
-        st.subheader("Financial Share of Voice")
-        
+        st.subheader("Financial Insights")
         report_list = []
         for brand, stats in st.session_state.audit_data.items():
             avg_q = stats["quality_sum"] / stats["sightings"] if stats["sightings"] > 0 else 0
-            report_list.append({
-                "Brand": brand, "Money": stats["money"], 
-                "Sightings": stats["sightings"], "Quality": round(avg_q, 1)
-            })
+            report_list.append({"Brand": brand, "Money": stats["money"], "Sightings": stats["sightings"], "Quality": round(avg_q, 1)})
         
         df_roi = pd.DataFrame(report_list)
-        
-        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, 
-                     color_discrete_sequence=['#CC0000', '#003366'])
-        fig.update_traces(texttemplate="$%{value:,.0f}<br>%{percent}")
+        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, color_discrete_sequence=['#CC0000', '#003366'])
+        fig.update_traces(texttemplate="$%{value:,.0f}")
         st.plotly_chart(fig, use_container_width=True)
 
         for _, row in df_roi.iterrows():
             st.metric(f"{row['Brand']} Quality", f"{row['Quality']}%")
         
-        # --- COST AVOIDANCE ---
+        # --- SOCIAL SHARE ---
         st.divider()
-        st.subheader("Cost Avoidance")
-        avoidance = tv_slot_cost - st.session_state.audit_data["Valvoline"]["money"]
-        st.metric("Savings vs TV Spend", f"${avoidance:,.2f}", delta="Cost Saved")
+        st.subheader("Share Results")
+        share_msg = f"Driven 13 Audit: Valvoline generated ${current_roi:,.2f} in Earned Media Value! 🏎️💨 #Driven13 #ValvolineROI"
+        encoded_msg = urllib.parse.quote(share_msg)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.link_button("Share on X (Twitter)", f"https://twitter.com/intent/tweet?text={encoded_msg}")
+        with c2:
+            st.link_button("Post to LinkedIn", f"https://www.linkedin.com/sharing/share-offsite/?url=https://driven13-anlaytic.streamlit.app")
 
-        # --- DOWNLOAD REPORT ---
+        # --- DOWNLOAD ---
         csv = df_roi.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Driven 13 ROI Report", 
-            data=csv, 
-            file_name='Driven13_ROI_Report.csv', 
-            mime='text/csv'
-        )
+        st.download_button(label="📥 Download ROI Report", data=csv, file_name='Driven13_ROI.csv')
 
-st.caption("Driven 13 Collective | Sponsorship Auditor V14.0")
+st.caption("Driven 13 Collective | Sponsorship Auditor V15.0")
+
 
 
