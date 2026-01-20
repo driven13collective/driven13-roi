@@ -4,6 +4,15 @@ import pandas as pd
 import plotly.express as px
 import urllib.parse
 
+import streamlit as st
+import warnings
+
+# Suppress annoying warnings from being shown to the user
+st.set_option('deprecation.showfileUploaderEncoding', False)
+st.set_option('deprecation.showPyplotGlobalUse', False)
+warnings.filterwarnings('ignore')
+
+
 # Error Catcher for CV2
 try:
     import cv2
@@ -108,4 +117,5 @@ if up_file:
         st.download_button(label="📥 Download ROI Report", data=csv, file_name='Driven13_ROI.csv')
 
 st.caption("Driven 13 Collective | Sponsorship Auditor V16.0")
+
 
