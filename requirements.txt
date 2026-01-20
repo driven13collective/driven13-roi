@@ -1,6 +1,5 @@
 streamlit
-supervision
-inference
+roboflow
 opencv-python-headless
 pandas
 plotly
