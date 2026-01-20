@@ -8,29 +8,22 @@ from roboflow import Roboflow
 
 # 1. PAGE SETUP
 st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
-st.markdown("""
-    <style>
-    .stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc;}
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("<style>.stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc;}</style>", unsafe_allow_html=True)
 
 st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
 
 # 2. CONFIGURATION (Sidebar)
 with st.sidebar:
-    st.header("Audit Settings")
+    st.header("Audit & Goal Settings")
     api_key = st.text_input("API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
-    model_id = st.text_input("Model ID", value="valvoline-roi/1")
+    roi_goal = st.number_input("Target ROI Goal ($)", value=5000.0)
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     comp_price = st.number_input("Competitor $/sighting", value=10.0)
 
 # 3. INITIALIZE AI
 rf = Roboflow(api_key=api_key)
-# Parsing project name from model_id (valvoline-roi/1 -> valvoline-roi)
-project_name = model_id.split('/')[0]
-project = rf.workspace().project(project_name)
+project = rf.workspace().project("valvoline-roi")
 model = project.version(1).model 
-tracker = sv.ByteTrack()
 
 up_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
@@ -38,7 +31,6 @@ if up_file:
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(up_file.read())
     
-    # Session State to hold data
     if 'audit_data' not in st.session_state:
         st.session_state.audit_data = {
             "Valvoline": {"money": 0.0, "sightings": 0, "quality_sum": 0.0},
@@ -50,6 +42,10 @@ if up_file:
     with col1:
         st.subheader("Live Analysis")
         frame_window = st.empty()
+        # Goal Progress Bar
+        goal_text = st.empty()
+        goal_bar = st.progress(0)
+        
         cap = cv2.VideoCapture(tfile.name)
         v_info = sv.VideoInfo.from_video_path(tfile.name)
 
@@ -58,61 +54,53 @@ if up_file:
                 ret, frame = cap.read()
                 if not ret: break
                 
-                # AI Inference
                 results = model.predict(frame, confidence=40).json()
                 
                 for pred in results['predictions']:
                     label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
                     
-                    # --- MEDIA QUALITY SCORE LOGIC ---
-                    # Quality = (Size of Logo relative to screen) + (AI Confidence)
-                    area_score = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
-                    quality_score = (area_score * 100) + (pred['confidence'] * 0.5)
-                    quality_score = min(quality_score * 10, 100) # Scale to 0-100
+                    # MEDIA QUALITY SCORE: (Size of Logo) + (AI Confidence)
+                    area = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
+                    q_score = min(((area * 1000) + (pred['confidence'] * 100)) / 2, 100)
                     
                     st.session_state.audit_data[label]["sightings"] += 1
                     st.session_state.audit_data[label]["money"] += val_price if label == "Valvoline" else comp_price
-                    st.session_state.audit_data[label]["quality_sum"] += quality_score
+                    st.session_state.audit_data[label]["quality_sum"] += q_score
 
-                # Display frame
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_window.image(frame_rgb)
+                # Update Progress Bar
+                current_roi = st.session_state.audit_data["Valvoline"]["money"]
+                progress_pct = min(current_roi / roi_goal, 1.0)
+                goal_bar.progress(progress_pct)
+                goal_text.write(f"**Goal Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f} ({progress_pct*100:.1f}%)")
+
+                frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            
+            if current_roi >= roi_goal:
+                st.balloons()
+                st.success("Target ROI Goal Reached!")
             cap.release()
 
     with col2:
         st.subheader("Financial Performance")
         
-        # Calculate Averages for Report
         report_list = []
         for brand, stats in st.session_state.audit_data.items():
             avg_q = stats["quality_sum"] / stats["sightings"] if stats["sightings"] > 0 else 0
             report_list.append({
-                "Brand": brand,
-                "Money": stats["money"],
-                "Sightings": stats["sightings"],
-                "Media Quality Score": round(avg_q, 1)
+                "Brand": brand, "Money": stats["money"], 
+                "Sightings": stats["sightings"], "Quality": round(avg_q, 1)
             })
         
         df_roi = pd.DataFrame(report_list)
-
-        # Pie Chart
-        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4,
-                     color_discrete_sequence=['#CC0000', '#003366'])
-        fig.update_traces(texttemplate="$%{value:,.0f}<br>%{percent}")
+        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, color_discrete_sequence=['#CC0000', '#003366'])
         st.plotly_chart(fig, use_container_width=True)
 
-        # Show Quality Score Metric
         for _, row in df_roi.iterrows():
-            st.metric(f"{row['Brand']} Quality", f"{row['Media Quality Score']}%")
+            st.metric(f"{row['Brand']} Quality", f"{row['Quality']}%")
 
-        # 4. DOWNLOAD DRIVEN 13 ROI REPORT
         st.divider()
         csv = df_roi.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Driven 13 ROI Report",
-            data=csv,
-            file_name='Driven13_ROI_Report.csv',
-            mime='text/csv',
-        )
+        st.download_button(label="📥 Download Driven 13 ROI Report", data=csv, file_name='Driven13_ROI_Report.csv', mime='text/csv')
 
-st.caption("Driven 13 Collective | Sponsorship Auditor V12.0")
+st.caption("Driven 13 Collective | Sponsorship Auditor V13.0")
+
