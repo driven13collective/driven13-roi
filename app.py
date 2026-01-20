@@ -111,4 +111,71 @@ if up_file is not None:
             st.error(f"Error: {e}")
 
 st.caption("Driven 13 Collective | Competitive Audit Build | V10.3")
+import streamlit as st
+import cv2
+import tempfile
+import pandas as pd
+import plotly.express as px
+from roboflow import Roboflow
+
+# 1. API Setup
+API_KEY = "3rcTmYwUyM4deHfzdLhy"
+rf = Roboflow(api_key=API_KEY)
+project = rf.workspace().project("valvoline-roi")
+model = project.version(1).model 
+
+st.title("Driven13 Valvoline ROI Tracker")
+
+# 2. Values (You can change these in the app sidebar)
+val_price = st.sidebar.number_input("Valvoline $/sighting", value=15.0)
+comp_price = st.sidebar.number_input("Competitor $/sighting", value=10.0)
+
+uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov"])
+
+if uploaded_file:
+    # Setup video processing
+    tfile = tempfile.NamedTemporaryFile(delete=False) 
+    tfile.write(uploaded_file.read())
+    cap = cv2.VideoCapture(tfile.name)
+    
+    counts = {"Valvoline": 0, "Competitor": 0}
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        frame_window = st.empty()
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret: break
+            
+            # AI Inference
+            results = model.predict(frame, confidence=45).json()
+            
+            # Count Logic
+            for pred in results['predictions']:
+                # The class name must match what you typed in Roboflow!
+                label = pred['class'] 
+                if label in counts:
+                    counts[label] += 1
+                else:
+                    counts["Competitor"] += 1
+            
+            frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+    with col2:
+        # 3. Monetary + Sighting Dataframe
+        df_roi = pd.DataFrame({
+            "Brand": ["Valvoline", "Competitor"],
+            "Money": [counts["Valvoline"] * val_price, counts["Competitor"] * comp_price],
+            "Sightings": [counts["Valvoline"], counts["Competitor"]]
+        })
+        
+        # 4. The Pie Chart
+        fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4)
+        fig.update_traces(
+            textinfo='label+percent',
+            texttemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{customdata[0]} Sightings",
+            customdata=df_roi[['Sightings']]
+        )
+        st.plotly_chart(fig)
 
