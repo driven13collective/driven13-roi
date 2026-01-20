@@ -17,6 +17,7 @@ with st.sidebar:
     st.header("Audit & Goal Settings")
     api_key = st.text_input("API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
     roi_goal = st.number_input("Target ROI Goal ($)", value=5000.0)
+    tv_slot_cost = st.number_input("Standard TV 30s Slot Cost ($)", value=25000.0)
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     comp_price = st.number_input("Competitor $/sighting", value=10.0)
 
@@ -43,7 +44,7 @@ if up_file:
         st.subheader("Live Analysis")
         frame_window = st.empty()
         
-        # --- NEW: GOAL PROGRESS BAR ---
+        # --- GOAL PROGRESS BAR ---
         goal_text = st.empty()
         goal_bar = st.progress(0)
         
@@ -60,8 +61,7 @@ if up_file:
                 for pred in results['predictions']:
                     label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
                     
-                    # --- NEW: MEDIA QUALITY SCORE LOGIC ---
-                    # area = size relative to screen. confidence = AI certainty.
+                    # --- MEDIA QUALITY SCORE LOGIC ---
                     area = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
                     q_score = min(((area * 1000) + (pred['confidence'] * 100)) / 2, 100)
                     
@@ -90,22 +90,26 @@ if up_file:
             avg_q = stats["quality_sum"] / stats["sightings"] if stats["sightings"] > 0 else 0
             report_list.append({
                 "Brand": brand, "Money": stats["money"], 
-                "Sightings": stats["sightings"], "Media Quality Score": round(avg_q, 1)
+                "Sightings": stats["sightings"], "Quality": round(avg_q, 1)
             })
         
         df_roi = pd.DataFrame(report_list)
         
-        # Pie Chart
         fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, 
                      color_discrete_sequence=['#CC0000', '#003366'])
         fig.update_traces(texttemplate="$%{value:,.0f}<br>%{percent}")
         st.plotly_chart(fig, use_container_width=True)
 
         for _, row in df_roi.iterrows():
-            st.metric(f"{row['Brand']} Quality", f"{row['Media Quality Score']}%")
-
-        # --- DOWNLOAD DRIVEN 13 REPORT ---
+            st.metric(f"{row['Brand']} Quality", f"{row['Quality']}%")
+        
+        # --- COST AVOIDANCE ---
         st.divider()
+        st.subheader("Cost Avoidance")
+        avoidance = tv_slot_cost - st.session_state.audit_data["Valvoline"]["money"]
+        st.metric("Savings vs TV Spend", f"${avoidance:,.2f}", delta="Cost Saved")
+
+        # --- DOWNLOAD REPORT ---
         csv = df_roi.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Driven 13 ROI Report", 
@@ -114,6 +118,6 @@ if up_file:
             mime='text/csv'
         )
 
-st.caption("Driven 13 Collective | Sponsorship Auditor V13.0")
+st.caption("Driven 13 Collective | Sponsorship Auditor V14.0")
 
 
