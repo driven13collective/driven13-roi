@@ -1,5 +1,6 @@
 import streamlit as st
-# 1. MUST BE THE VERY FIRST STREAMLIT COMMAND
+
+# 1. PAGE SETUP (Must be the very first Streamlit command)
 st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
 
 import cv2
@@ -23,7 +24,6 @@ with st.sidebar:
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     comp_price = st.number_input("Competitor $/sighting", value=10.0)
     
-    # ADDED: RESET BUTTON
     if st.button("🔄 Reset Audit Data"):
         st.session_state.audit_data = {
             "Valvoline": {"money": 0.0, "sightings": 0, "quality_sum": 0.0},
@@ -44,6 +44,7 @@ if api_key:
 up_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
 if up_file:
+    # Save uploaded file to temporary location
     tfile = tempfile.NamedTemporaryFile(delete=False)
     tfile.write(up_file.read())
     
@@ -88,7 +89,7 @@ if up_file:
                 goal_bar.progress(progress_pct)
                 goal_text.write(f"**Valvoline ROI Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f}")
                 
-                # Display
+                # Display processed frame
                 frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             
             if current_roi >= roi_goal: st.balloons()
@@ -115,4 +116,4 @@ if up_file:
         csv = df_roi.to_csv(index=False).encode('utf-8')
         st.download_button(label="📥 Download ROI Report", data=csv, file_name='Driven13_ROI.csv')
 
-st.caption("Driven 13 Collective | Sponsorship Auditor V17.0")
+st.caption("Driven 13 Collective | Sponsorship Auditor V18.0")
