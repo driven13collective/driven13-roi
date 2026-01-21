@@ -1,50 +1,46 @@
 import streamlit as st
+# 1. MUST BE THE VERY FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
+
+import cv2
 import tempfile
+import supervision as sv
 import pandas as pd
 import plotly.express as px
+from roboflow import Roboflow
 import urllib.parse
+import numpy as np
 
-import streamlit as st
-import warnings
-
-# Suppress annoying warnings from being shown to the user
-st.set_option('deprecation.showfileUploaderEncoding', False)
-st.set_option('deprecation.showPyplotGlobalUse', False)
-warnings.filterwarnings('ignore')
-
-
-# Error Catcher for CV2
-try:
-    import cv2
-    import supervision as sv
-    from roboflow import Roboflow
-except ImportError as e:
-    st.error(f"Critical Library Error: {e}")
-    st.info("Check your requirements.txt for opencv-python-headless")
-
-# 1. PAGE SETUP
-st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
+# 2. BEAUTIFICATION
 st.markdown("<style>.stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc; color: white;}</style>", unsafe_allow_html=True)
-
 st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
 
-# 2. SIDEBAR
+# 3. SIDEBAR CONFIG
 with st.sidebar:
     st.header("Audit & Goal Settings")
     api_key = st.text_input("API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
     roi_goal = st.number_input("Target ROI Goal ($)", value=5000.0)
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     comp_price = st.number_input("Competitor $/sighting", value=10.0)
+    
+    # ADDED: RESET BUTTON
+    if st.button("🔄 Reset Audit Data"):
+        st.session_state.audit_data = {
+            "Valvoline": {"money": 0.0, "sightings": 0, "quality_sum": 0.0},
+            "Competitor": {"money": 0.0, "sightings": 0, "quality_sum": 0.0}
+        }
+        st.rerun()
 
-# 3. INITIALIZE MODELS
+# 4. INITIALIZE AI
 if api_key:
     try:
         rf = Roboflow(api_key=api_key)
         project = rf.workspace().project("valvoline-roi")
         model = project.version(1).model 
     except Exception as e:
-        st.warning("Waiting for valid API Key and Model connection...")
+        st.error("Connection to Roboflow failed. Check your API Key.")
 
+# 5. UPLOAD & ANALYSIS
 up_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
 if up_file:
@@ -73,9 +69,12 @@ if up_file:
                 ret, frame = cap.read()
                 if not ret: break
                 
+                # Inference
                 results = model.predict(frame, confidence=40).json()
                 for pred in results['predictions']:
                     label = "Valvoline" if "valvoline" in pred['class'].lower() else "Competitor"
+                    
+                    # Media Quality Score
                     area = (pred['width'] * pred['height']) / (v_info.width * v_info.height)
                     q_score = min(((area * 1000) + (pred['confidence'] * 100)) / 2, 100)
                     
@@ -83,10 +82,13 @@ if up_file:
                     st.session_state.audit_data[label]["money"] += val_price if label == "Valvoline" else comp_price
                     st.session_state.audit_data[label]["quality_sum"] += q_score
 
+                # Progress Bar
                 current_roi = st.session_state.audit_data["Valvoline"]["money"]
                 progress_pct = min(current_roi / roi_goal, 1.0)
                 goal_bar.progress(progress_pct)
                 goal_text.write(f"**Valvoline ROI Progress:** ${current_roi:,.2f} / ${roi_goal:,.2f}")
+                
+                # Display
                 frame_window.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             
             if current_roi >= roi_goal: st.balloons()
@@ -100,6 +102,8 @@ if up_file:
             report_list.append({"Brand": brand, "Money": stats["money"], "Sightings": stats["sightings"], "Quality": round(avg_q, 1)})
         
         df_roi = pd.DataFrame(report_list)
+        
+        # Pie Chart
         fig = px.pie(df_roi, values='Money', names='Brand', hole=0.4, color_discrete_sequence=['#CC0000', '#003366'])
         fig.update_traces(texttemplate="$%{value:,.0f}<br>%{percent}")
         st.plotly_chart(fig, use_container_width=True)
@@ -108,14 +112,7 @@ if up_file:
             st.metric(f"{row['Brand']} Quality", f"{row['Quality']}%")
         
         st.divider()
-        st.subheader("Share Results")
-        share_msg = f"Driven 13 Audit: Valvoline generated ${st.session_state.audit_data['Valvoline']['money']:,.2f} in ROI!"
-        encoded_msg = urllib.parse.quote(share_msg)
-        st.link_button("Post to X (Twitter)", f"https://twitter.com/intent/tweet?text={encoded_msg}")
-        
         csv = df_roi.to_csv(index=False).encode('utf-8')
         st.download_button(label="📥 Download ROI Report", data=csv, file_name='Driven13_ROI.csv')
 
-st.caption("Driven 13 Collective | Sponsorship Auditor V16.0")
-
-
+st.caption("Driven 13 Collective | Sponsorship Auditor V17.0")
