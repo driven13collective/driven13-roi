@@ -8,6 +8,7 @@ from roboflow import Roboflow
 import numpy as np
 import os
 import time
+from datetime import datetime
 
 # 1. PAGE SETUP
 st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", layout="wide")
@@ -15,61 +16,52 @@ st.set_page_config(page_title="Driven 13 | ROI Auditor", page_icon="🏎️", la
 st.markdown("""
     <style>
     .stMetric {background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #00ffcc; color: white;}
-    .stProgress > div > div > div > div { background-color: #00ffcc; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🏎️ Driven 13 Collective: ROI Sponsorship Auditor")
 
-# 2. SIDEBAR & API CONFIG
+# 2. SIDEBAR
 with st.sidebar:
-    st.header("Audit & Goal Settings")
-    # Using your confirmed Private API Key
+    st.header("Audit Configuration")
     api_key = st.text_input("Private API Key", value="3rcTmYwUyM4deHfzdLhy", type="password")
     roi_goal = st.number_input("Target ROI Goal ($)", value=5000.0)
     val_price = st.number_input("Valvoline $/sighting", value=15.0)
     aramco_price = st.number_input("Aramco $/sighting", value=12.0)
     
-    if st.button("🔄 Reset Audit Data"):
+    if st.button("🔄 Reset Audit"):
+        st.session_state.audit_log = []
         st.session_state.audit_data = {"Valvoline": 0.0, "Aramco": 0.0, "Count": {"Valvoline": 0, "Aramco": 0}}
         st.rerun()
 
-# 3. INITIALIZE MODEL (VERSION 5)
-model = None
+# 3. AI INITIALIZATION
 if api_key:
     try:
         rf = Roboflow(api_key=api_key)
-        # Verify project name matches your URL slug
         project = rf.workspace().project("valvoline-roi")
-        # Explicitly using Version 5 (Production-V1)
         model = project.version(5).model 
-        
-        # Professional UI Annotators
         box_annotator = sv.BoxAnnotator(thickness=2)
         label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1)
-        st.sidebar.success("✅ Connected: Production-V1 (v5)")
     except Exception as e:
-        st.sidebar.error(f"Connection failed: {e}")
+        st.error(f"AI Connection Error: {e}")
 
-# 4. UPLOAD & ANALYSIS
+# 4. UPLOAD
 up_file = st.file_uploader("Upload Race Footage", type=["mp4", "mov"])
 
-if up_file and model:
-    # Save video to temporary file
+if up_file:
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     tfile.write(up_file.read())
-    tfile.close() 
+    tfile.close()
     
-    # Initialize session state for tracking
     if 'audit_data' not in st.session_state:
         st.session_state.audit_data = {"Valvoline": 0.0, "Aramco": 0.0, "Count": {"Valvoline": 0, "Aramco": 0}}
+        st.session_state.audit_log = [] # For the CSV report
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
         st.subheader("Live Analysis Feed")
         frame_window = st.empty()
-        goal_text = st.empty()
         goal_bar = st.progress(0)
         
         cap = cv2.VideoCapture(tfile.name)
@@ -81,71 +73,81 @@ if up_file and model:
                 if not ret: break
                 
                 frame_count += 1
-                # ANALYZE 1 EVERY 6 FRAMES (Reduces API load, maintains demo quality)
-                if frame_count % 6 != 0:
+                # Increase skip to 10 for "Fast Mode" if 6 is still too slow
+                if frame_count % 8 != 0: 
                     continue
 
-                # Temp image for Roboflow Predict
-                temp_img_path = f"frame_{frame_count}.jpg"
-                cv2.imwrite(temp_img_path, frame)
-                
-                # Small wait to ensure disk write is complete
-                time.sleep(0.05) 
+                temp_path = "stream_frame.jpg"
+                cv2.imwrite(temp_path, frame)
                 
                 try:
-                    # Run Inference on Version 5
-                    results = model.predict(temp_img_path, confidence=40).json()
+                    results = model.predict(temp_path, confidence=40).json()
                     detections = sv.Detections.from_inference(results)
                     
-                    # Log ROI logic
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    
                     for pred in results['predictions']:
-                        raw_class = pred['class'].lower()
-                        brand = "Valvoline" if "valvoline" in raw_class else "Aramco"
-                        st.session_state.audit_data[brand] += val_price if brand == "Valvoline" else aramco_price
+                        brand = "Valvoline" if "valvoline" in pred['class'].lower() else "Aramco"
+                        price = val_price if brand == "Valvoline" else aramco_price
+                        
+                        # Update State
+                        st.session_state.audit_data[brand] += price
                         st.session_state.audit_data["Count"][brand] += 1
+                        
+                        # Log for CSV
+                        st.session_state.audit_log.append({
+                            "Timestamp": timestamp,
+                            "Frame": frame_count,
+                            "Brand": brand,
+                            "Value_Generated": price
+                        })
 
-                    # Draw Boxes and Labels
+                    # Annotation & Smooth Display
                     annotated_frame = box_annotator.annotate(scene=frame.copy(), detections=detections)
                     annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections)
-                    
-                    # Update Progress Bar
-                    val_roi = st.session_state.audit_data["Valvoline"]
-                    goal_bar.progress(min(val_roi / roi_goal, 1.0))
-                    goal_text.write(f"**Valvoline Current ROI:** ${val_roi:,.2f} / ${roi_goal:,.2f}")
-                    
-                    # Convert BGR to RGB for Streamlit display
                     frame_window.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
                     
-                except Exception as api_err:
-                    st.warning(f"API Rate Limit - skipping frame... ({api_err})")
-                    time.sleep(1) # Cool down
-                
-                # Cleanup frame
-                if os.path.exists(temp_img_path): os.remove(temp_img_path)
-            
+                    val_roi = st.session_state.audit_data["Valvoline"]
+                    goal_bar.progress(min(val_roi / roi_goal, 1.0))
+                    
+                except:
+                    continue 
+
             cap.release()
-            if st.session_state.audit_data["Valvoline"] >= roi_goal: 
-                st.balloons()
             st.success("Audit Complete!")
 
     with col2:
-        st.subheader("Share of Voice (SOV)")
+        st.subheader("Financial Report")
+        
+        # DONUT CHART
         sov_df = pd.DataFrame({
             "Brand": ["Valvoline", "Aramco"],
-            "Value": [st.session_state.audit_data["Valvoline"], st.session_state.audit_data["Aramco"]]
+            "Money": [st.session_state.audit_data["Valvoline"], st.session_state.audit_data["Aramco"]]
         })
         
-        if sov_df["Value"].sum() > 0:
-            fig = px.pie(sov_df, values='Value', names='Brand', hole=0.5,
+        if sov_df["Money"].sum() > 0:
+            fig = px.pie(sov_df, values='Money', names='Brand', hole=0.5,
                          color='Brand', color_discrete_map={'Valvoline': '#CC0000', 'Aramco': '#007A33'})
-            fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
             st.plotly_chart(fig, use_container_width=True)
 
-        st.metric("Valvoline ROI", f"${st.session_state.audit_data['Valvoline']:,.2f}")
-        st.metric("Aramco ROI", f"${st.session_state.audit_data['Aramco']:,.2f}")
-        st.divider()
-        st.write(f"Total Detections: {sum(st.session_state.audit_data['Count'].values())}")
+        st.metric("Valvoline Total", f"${st.session_state.audit_data['Valvoline']:,.2f}")
+        st.metric("Aramco Total", f"${st.session_state.audit_data['Aramco']:,.2f}")
 
-st.caption("Driven 13 Collective | Production-V1 Engine (v5)")
+        # --- NEW: DOWNLOAD REPORT SECTION ---
+        st.divider()
+        if st.session_state.audit_log:
+            report_df = pd.DataFrame(st.session_state.audit_log)
+            csv = report_df.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📥 Download Audit Report (CSV)",
+                data=csv,
+                file_name=f"driven13_roi_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime='text/csv',
+            )
+            st.write("Report contains per-second brand valuations.")
+
+st.caption("Driven 13 Collective | ROI Engine v5.1")
+
 
 
